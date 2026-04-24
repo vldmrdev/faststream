@@ -3,7 +3,6 @@ import sys
 import warnings
 from collections import UserString
 from collections.abc import Callable, Iterable, Mapping
-from importlib.metadata import version as get_version
 from importlib.util import find_spec
 from typing import (
     Any,
@@ -14,6 +13,7 @@ from pydantic import BaseModel
 from pydantic.version import VERSION as PYDANTIC_VERSION
 
 IS_WINDOWS = sys.platform in {"win32", "cygwin", "msys"}
+IS_MACOS = sys.platform == "darwin"
 
 __all__ = (
     "HAS_TYPER",
@@ -37,28 +37,15 @@ except ImportError:
 
 json_dumps: Callable[..., bytes]
 orjson: Any
-ujson: Any
 
 try:
     import orjson  # type: ignore[no-redef]
 except ImportError:
     orjson = None
 
-try:
-    import ujson
-except ImportError:
-    ujson = None
-
 if orjson:
     json_loads = orjson.loads
     json_dumps = orjson.dumps
-
-elif ujson:
-    json_loads = ujson.loads
-
-    def json_dumps(*a: Any, **kw: Any) -> bytes:
-        return ujson.dumps(*a, **kw).encode()  # type: ignore[no-any-return]
-
 else:
     json_loads = json.loads
 
@@ -167,15 +154,8 @@ else:
         return {}
 
 
-major, *_ = get_version("anyio").split(".")
-_ANYIO_MAJOR = int(major)
-ANYIO_V3 = _ANYIO_MAJOR == 3
-
-
-if ANYIO_V3:
-    from anyio import ExceptionGroup  # type: ignore[attr-defined]
-elif sys.version_info >= (3, 11):
-    ExceptionGroup = ExceptionGroup  # noqa: PLW0127
+if sys.version_info >= (3, 11):
+    ExceptionGroup = ExceptionGroup  # noqa: F821,PLW0127
 else:
     from exceptiongroup import ExceptionGroup
 
@@ -204,7 +184,7 @@ except ImportError:  # pragma: no cover
         def validate(cls, v: Any) -> str:
             """Validates the EmailStr class."""
             warnings.warn(
-                "email-validator bot installed, email fields will be treated as str.\n"
+                "email-validator not installed, email fields will be treated as str.\n"
                 "To install, run: pip install email-validator",
                 category=RuntimeWarning,
                 stacklevel=1,
@@ -214,7 +194,7 @@ except ImportError:  # pragma: no cover
         @classmethod
         def _validate(cls, __input_value: Any, _: Any) -> str:
             warnings.warn(
-                "email-validator bot installed, email fields will be treated as str.\n"
+                "email-validator not installed, email fields will be treated as str.\n"
                 "To install, run: pip install email-validator",
                 category=RuntimeWarning,
                 stacklevel=1,

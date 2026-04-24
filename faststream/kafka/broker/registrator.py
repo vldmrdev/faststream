@@ -1,7 +1,6 @@
 from collections.abc import Callable, Collection, Iterable, Sequence
 from typing import (
     TYPE_CHECKING,
-    Annotated,
     Any,
     Literal,
     Optional,
@@ -12,7 +11,7 @@ from typing import (
 
 from aiokafka import ConsumerRecord
 from aiokafka.coordinator.assignors.roundrobin import RoundRobinPartitionAssignor
-from typing_extensions import deprecated, override
+from typing_extensions import override
 
 from faststream._internal.broker.registrator import Registrator
 from faststream._internal.constants import EMPTY
@@ -31,8 +30,6 @@ if TYPE_CHECKING:
     from faststream._internal.types import (
         BrokerMiddleware,
         CustomCallable,
-        PublisherMiddleware,
-        SubscriberMiddleware,
     )
     from faststream.kafka.publisher.usecase import (
         BatchPublisher,
@@ -58,8 +55,9 @@ class KafkaRegistrator(
     def subscriber(
         self,
         *topics: str,
-        batch: Literal[True],
+        batch: Literal[False] = False,
         group_id: str | None = None,
+        group_instance_id: str | None = None,
         key_deserializer: Callable[[bytes], Any] | None = None,
         value_deserializer: Callable[[bytes], Any] | None = None,
         fetch_max_bytes: int = 50 * 1024 * 1024,
@@ -67,13 +65,6 @@ class KafkaRegistrator(
         fetch_max_wait_ms: int = 500,
         max_partition_fetch_bytes: int = 1 * 1024 * 1024,
         auto_offset_reset: Literal["latest", "earliest", "none"] = "latest",
-        auto_commit: Annotated[
-            bool,
-            deprecated(
-                "This option is deprecated and will be removed in 0.7.0 release. "
-                "Please, use `ack_policy=AckPolicy.ACK_FIRST` instead."
-            ),
-        ] = EMPTY,
         auto_commit_interval_ms: int = 5 * 1000,
         check_crcs: bool = True,
         partition_assignment_strategy: Sequence["AbstractPartitionAssignor"] = (
@@ -95,24 +86,59 @@ class KafkaRegistrator(
         pattern: str | None = None,
         partitions: Collection["TopicPartition"] = (),
         # broker args
+        persistent: bool = True,
         dependencies: Iterable["Dependant"] = (),
         parser: Optional["CustomCallable"] = None,
         decoder: Optional["CustomCallable"] = None,
-        middlewares: Annotated[
-            Sequence["SubscriberMiddleware[Any]"],
-            deprecated(
-                "This option was deprecated in 0.6.0. Use router-level middlewares instead. "
-                "Scheduled to remove in 0.7.0",
-            ),
-        ] = (),
-        no_ack: Annotated[
-            bool,
-            deprecated(
-                "This option was deprecated in 0.6.0 to prior to **ack_policy=AckPolicy.MANUAL**. "
-                "Scheduled to remove in 0.7.0",
-            ),
-        ] = EMPTY,
-        max_workers: int | None = None,
+        max_workers: None = None,
+        ack_policy: AckPolicy = EMPTY,
+        no_reply: bool = False,
+        # Specification args
+        title: str | None = None,
+        description: str | None = None,
+        include_in_schema: bool = True,
+    ) -> "DefaultSubscriber": ...
+
+    @overload
+    def subscriber(
+        self,
+        *topics: str,
+        batch: Literal[True] = ...,
+        group_id: str | None = None,
+        group_instance_id: str | None = None,
+        key_deserializer: Callable[[bytes], Any] | None = None,
+        value_deserializer: Callable[[bytes], Any] | None = None,
+        fetch_max_bytes: int = 50 * 1024 * 1024,
+        fetch_min_bytes: int = 1,
+        fetch_max_wait_ms: int = 500,
+        max_partition_fetch_bytes: int = 1 * 1024 * 1024,
+        auto_offset_reset: Literal["latest", "earliest", "none"] = "latest",
+        auto_commit_interval_ms: int = 5 * 1000,
+        check_crcs: bool = True,
+        partition_assignment_strategy: Sequence["AbstractPartitionAssignor"] = (
+            RoundRobinPartitionAssignor,
+        ),
+        max_poll_interval_ms: int = 5 * 60 * 1000,
+        rebalance_timeout_ms: int | None = None,
+        session_timeout_ms: int = 10 * 1000,
+        heartbeat_interval_ms: int = 3 * 1000,
+        consumer_timeout_ms: int = 200,
+        max_poll_records: int | None = None,
+        exclude_internal_topics: bool = True,
+        isolation_level: Literal[
+            "read_uncommitted", "read_committed"
+        ] = "read_uncommitted",
+        batch_timeout_ms: int = 200,
+        max_records: int | None = None,
+        listener: Optional["ConsumerRebalanceListener"] = None,
+        pattern: str | None = None,
+        partitions: Collection["TopicPartition"] = (),
+        # broker args
+        persistent: bool = True,
+        dependencies: Iterable["Dependant"] = (),
+        parser: Optional["CustomCallable"] = None,
+        decoder: Optional["CustomCallable"] = None,
+        max_workers: None = None,
         ack_policy: AckPolicy = EMPTY,
         no_reply: bool = False,
         # Specification args
@@ -126,7 +152,8 @@ class KafkaRegistrator(
         self,
         *topics: str,
         batch: Literal[False] = False,
-        group_id: str | None = None,
+        group_id: None = None,
+        group_instance_id: str | None = None,
         key_deserializer: Callable[[bytes], Any] | None = None,
         value_deserializer: Callable[[bytes], Any] | None = None,
         fetch_max_bytes: int = 50 * 1024 * 1024,
@@ -134,13 +161,6 @@ class KafkaRegistrator(
         fetch_max_wait_ms: int = 500,
         max_partition_fetch_bytes: int = 1 * 1024 * 1024,
         auto_offset_reset: Literal["latest", "earliest", "none"] = "latest",
-        auto_commit: Annotated[
-            bool,
-            deprecated(
-                "This option is deprecated and will be removed in 0.7.0 release. "
-                "Please, use `ack_policy=AckPolicy.ACK_FIRST` instead."
-            ),
-        ] = EMPTY,
         auto_commit_interval_ms: int = 5 * 1000,
         check_crcs: bool = True,
         partition_assignment_strategy: Sequence["AbstractPartitionAssignor"] = (
@@ -162,35 +182,66 @@ class KafkaRegistrator(
         pattern: str | None = None,
         partitions: Collection["TopicPartition"] = (),
         # broker args
+        persistent: bool = True,
         dependencies: Iterable["Dependant"] = (),
         parser: Optional["CustomCallable"] = None,
         decoder: Optional["CustomCallable"] = None,
-        middlewares: Annotated[
-            Sequence["SubscriberMiddleware[Any]"],
-            deprecated(
-                "This option was deprecated in 0.6.0. Use router-level middlewares instead. "
-                "Scheduled to remove in 0.7.0",
-            ),
-        ] = (),
-        no_ack: Annotated[
-            bool,
-            deprecated(
-                "This option was deprecated in 0.6.0 to prior to **ack_policy=AckPolicy.MANUAL**. "
-                "Scheduled to remove in 0.7.0",
-            ),
-        ] = EMPTY,
-        max_workers: int | None = None,
+        max_workers: int = ...,
         ack_policy: AckPolicy = EMPTY,
         no_reply: bool = False,
         # Specification args
         title: str | None = None,
         description: str | None = None,
         include_in_schema: bool = True,
-    ) -> Union[
-        "DefaultSubscriber",
-        "ConcurrentDefaultSubscriber",
-        "ConcurrentBetweenPartitionsSubscriber",
-    ]: ...
+    ) -> "ConcurrentDefaultSubscriber": ...
+
+    @overload
+    def subscriber(
+        self,
+        *topics: str,
+        batch: Literal[False] = False,
+        group_id: str = ...,
+        group_instance_id: str | None = None,
+        key_deserializer: Callable[[bytes], Any] | None = None,
+        value_deserializer: Callable[[bytes], Any] | None = None,
+        fetch_max_bytes: int = 50 * 1024 * 1024,
+        fetch_min_bytes: int = 1,
+        fetch_max_wait_ms: int = 500,
+        max_partition_fetch_bytes: int = 1 * 1024 * 1024,
+        auto_offset_reset: Literal["latest", "earliest", "none"] = "latest",
+        auto_commit_interval_ms: int = 5 * 1000,
+        check_crcs: bool = True,
+        partition_assignment_strategy: Sequence["AbstractPartitionAssignor"] = (
+            RoundRobinPartitionAssignor,
+        ),
+        max_poll_interval_ms: int = 5 * 60 * 1000,
+        rebalance_timeout_ms: int | None = None,
+        session_timeout_ms: int = 10 * 1000,
+        heartbeat_interval_ms: int = 3 * 1000,
+        consumer_timeout_ms: int = 200,
+        max_poll_records: int | None = None,
+        exclude_internal_topics: bool = True,
+        isolation_level: Literal[
+            "read_uncommitted", "read_committed"
+        ] = "read_uncommitted",
+        batch_timeout_ms: int = 200,
+        max_records: int | None = None,
+        listener: Optional["ConsumerRebalanceListener"] = None,
+        pattern: str | None = None,
+        partitions: Collection["TopicPartition"] = (),
+        # broker args
+        persistent: bool = True,
+        dependencies: Iterable["Dependant"] = (),
+        parser: Optional["CustomCallable"] = None,
+        decoder: Optional["CustomCallable"] = None,
+        max_workers: int = ...,
+        ack_policy: AckPolicy = EMPTY,
+        no_reply: bool = False,
+        # Specification args
+        title: str | None = None,
+        description: str | None = None,
+        include_in_schema: bool = True,
+    ) -> "ConcurrentBetweenPartitionsSubscriber": ...
 
     @overload
     def subscriber(
@@ -198,6 +249,7 @@ class KafkaRegistrator(
         *topics: str,
         batch: bool = False,
         group_id: str | None = None,
+        group_instance_id: str | None = None,
         key_deserializer: Callable[[bytes], Any] | None = None,
         value_deserializer: Callable[[bytes], Any] | None = None,
         fetch_max_bytes: int = 50 * 1024 * 1024,
@@ -205,13 +257,6 @@ class KafkaRegistrator(
         fetch_max_wait_ms: int = 500,
         max_partition_fetch_bytes: int = 1 * 1024 * 1024,
         auto_offset_reset: Literal["latest", "earliest", "none"] = "latest",
-        auto_commit: Annotated[
-            bool,
-            deprecated(
-                "This option is deprecated and will be removed in 0.7.0 release. "
-                "Please, use `ack_policy=AckPolicy.ACK_FIRST` instead."
-            ),
-        ] = EMPTY,
         auto_commit_interval_ms: int = 5 * 1000,
         check_crcs: bool = True,
         partition_assignment_strategy: Sequence["AbstractPartitionAssignor"] = (
@@ -233,24 +278,11 @@ class KafkaRegistrator(
         pattern: str | None = None,
         partitions: Collection["TopicPartition"] = (),
         # broker args
+        persistent: bool = True,
         dependencies: Iterable["Dependant"] = (),
         parser: Optional["CustomCallable"] = None,
         decoder: Optional["CustomCallable"] = None,
-        middlewares: Annotated[
-            Sequence["SubscriberMiddleware[Any]"],
-            deprecated(
-                "This option was deprecated in 0.6.0. Use router-level middlewares instead. "
-                "Scheduled to remove in 0.7.0",
-            ),
-        ] = (),
-        no_ack: Annotated[
-            bool,
-            deprecated(
-                "This option was deprecated in 0.6.0 to prior to **ack_policy=AckPolicy.MANUAL**. "
-                "Scheduled to remove in 0.7.0",
-            ),
-        ] = EMPTY,
-        max_workers: int | None = 0,
+        max_workers: int | None = None,
         ack_policy: AckPolicy = EMPTY,
         no_reply: bool = False,
         # Specification args
@@ -270,6 +302,7 @@ class KafkaRegistrator(
         *topics: str,
         batch: bool = False,
         group_id: str | None = None,
+        group_instance_id: str | None = None,
         key_deserializer: Callable[[bytes], Any] | None = None,
         value_deserializer: Callable[[bytes], Any] | None = None,
         fetch_max_bytes: int = 50 * 1024 * 1024,
@@ -277,13 +310,6 @@ class KafkaRegistrator(
         fetch_max_wait_ms: int = 500,
         max_partition_fetch_bytes: int = 1 * 1024 * 1024,
         auto_offset_reset: Literal["latest", "earliest", "none"] = "latest",
-        auto_commit: Annotated[
-            bool,
-            deprecated(
-                "This option is deprecated and will be removed in 0.7.0 release. "
-                "Please, use `ack_policy=AckPolicy.ACK_FIRST` instead."
-            ),
-        ] = EMPTY,
         auto_commit_interval_ms: int = 5 * 1000,
         check_crcs: bool = True,
         partition_assignment_strategy: Sequence["AbstractPartitionAssignor"] = (
@@ -305,23 +331,10 @@ class KafkaRegistrator(
         pattern: str | None = None,
         partitions: Collection["TopicPartition"] = (),
         # broker args
+        persistent: bool = True,
         dependencies: Iterable["Dependant"] = (),
         parser: Optional["CustomCallable"] = None,
         decoder: Optional["CustomCallable"] = None,
-        middlewares: Annotated[
-            Sequence["SubscriberMiddleware[Any]"],
-            deprecated(
-                "This option was deprecated in 0.6.0. Use router-level middlewares instead. "
-                "Scheduled to remove in 0.7.0",
-            ),
-        ] = (),
-        no_ack: Annotated[
-            bool,
-            deprecated(
-                "This option was deprecated in 0.6.0 to prior to **ack_policy=AckPolicy.MANUAL**. "
-                "Scheduled to remove in 0.7.0",
-            ),
-        ] = EMPTY,
         max_workers: int | None = None,
         ack_policy: AckPolicy = EMPTY,
         no_reply: bool = False,
@@ -345,6 +358,11 @@ class KafkaRegistrator(
                 partition assignment (if enabled), and to use for fetching and
                 committing offsets. If `None`, auto-partition assignment (via
                 group coordinator) and offset commits are disabled.
+            group_instance_id:
+                Name of the group instance ID used for static
+                membership (KIP-345). If set, the consumer is treated as a
+                static member, which means it does not join/leave the group
+                on each restart, avoiding unnecessary rebalances.
             key_deserializer:
                 Any callable that takes a raw message `bytes`
                 key and returns a deserialized one.
@@ -519,7 +537,7 @@ class KafkaRegistrator(
             title: Specification subscriber object title.
             description: Specification subscriber object description. " "Uses decorated docstring as default.
             include_in_schema: Whetever to include operation in Specification schema or not.
-
+            persistent: Whether to make the subscriber persistent or not.
         """
         workers = max_workers or 1
 
@@ -533,6 +551,7 @@ class KafkaRegistrator(
             listener=listener,
             pattern=pattern,
             connection_args={
+                "group_instance_id": group_instance_id,
                 "key_deserializer": key_deserializer,
                 "value_deserializer": value_deserializer,
                 "fetch_max_wait_ms": fetch_max_wait_ms,
@@ -553,11 +572,7 @@ class KafkaRegistrator(
                 "isolation_level": isolation_level,
             },
             partitions=partitions,
-            # acknowledgement args
             ack_policy=ack_policy,
-            no_ack=no_ack,
-            auto_commit=auto_commit,
-            # subscriber args
             no_reply=no_reply,
             config=cast("KafkaBrokerConfig", self.config),
             # Specification
@@ -566,20 +581,19 @@ class KafkaRegistrator(
             include_in_schema=include_in_schema,
         )
 
-        super().subscriber(subscriber)
+        super().subscriber(subscriber, persistent=persistent)
 
         subscriber.add_call(
             parser_=parser,
             decoder_=decoder,
             dependencies_=dependencies,
-            middlewares_=middlewares,
         )
 
         if batch:
             return cast("BatchSubscriber", subscriber)
 
         if workers > 1:
-            if auto_commit:
+            if subscriber.ack_policy is AckPolicy.ACK_FIRST:
                 return cast("ConcurrentDefaultSubscriber", subscriber)
             return cast("ConcurrentBetweenPartitionsSubscriber", subscriber)
         return cast("DefaultSubscriber", subscriber)
@@ -595,13 +609,7 @@ class KafkaRegistrator(
         reply_to: str = "",
         batch: Literal[False] = False,
         # basic args
-        middlewares: Annotated[
-            Sequence["PublisherMiddleware"],
-            deprecated(
-                "This option was deprecated in 0.6.0. Use router-level middlewares instead."
-                "Scheduled to remove in 0.7.0",
-            ),
-        ] = (),
+        persistent: bool = True,
         # Specification args
         title: str | None = None,
         description: str | None = None,
@@ -619,15 +627,9 @@ class KafkaRegistrator(
         partition: int | None = None,
         headers: dict[str, str] | None = None,
         reply_to: str = "",
-        batch: Literal[True],
+        batch: Literal[True] = ...,
         # basic args
-        middlewares: Annotated[
-            Sequence["PublisherMiddleware"],
-            deprecated(
-                "This option was deprecated in 0.6.0. Use router-level middlewares instead."
-                "Scheduled to remove in 0.7.0",
-            ),
-        ] = (),
+        persistent: bool = True,
         title: str | None = None,
         description: str | None = None,
         schema: Any | None = None,
@@ -646,13 +648,7 @@ class KafkaRegistrator(
         reply_to: str = "",
         batch: bool = False,
         # basic args
-        middlewares: Annotated[
-            Sequence["PublisherMiddleware"],
-            deprecated(
-                "This option was deprecated in 0.6.0. Use router-level middlewares instead."
-                "Scheduled to remove in 0.7.0",
-            ),
-        ] = (),
+        persistent: bool = True,
         # Specification args
         title: str | None = None,
         description: str | None = None,
@@ -675,13 +671,7 @@ class KafkaRegistrator(
         reply_to: str = "",
         batch: bool = False,
         # basic args
-        middlewares: Annotated[
-            Sequence["PublisherMiddleware"],
-            deprecated(
-                "This option was deprecated in 0.6.0. Use router-level middlewares instead."
-                "Scheduled to remove in 0.7.0",
-            ),
-        ] = (),
+        persistent: bool = True,
         # Specification args
         title: str | None = None,
         description: str | None = None,
@@ -718,7 +708,6 @@ class KafkaRegistrator(
                 Can be overridden by `publish.headers` if specified.
             reply_to: Topic name to send response.
             batch: Whether to send messages in batches or not.
-            middlewares: middlewares: Publisher middlewares to wrap outgoing messages.
             title: Specification publisher object title.
             description: Specification publisher object description.
             schema:
@@ -726,6 +715,7 @@ class KafkaRegistrator(
                 Should be any python-native object annotation or `pydantic.BaseModel`.
             include_in_schema: Whetever to include operation in Specification schema or not.
             autoflush: Whether to flush the producer or not on every publish call.
+            persistent: Whether to make the publisher persistent or not.
         """
         publisher = create_publisher(
             autoflush=autoflush,
@@ -740,7 +730,6 @@ class KafkaRegistrator(
             reply_to=reply_to,
             # publisher-specific
             config=cast("KafkaBrokerConfig", self.config),
-            middlewares=middlewares,
             # Specification
             title_=title,
             description_=description,
@@ -748,7 +737,7 @@ class KafkaRegistrator(
             include_in_schema=include_in_schema,
         )
 
-        super().publisher(publisher)
+        super().publisher(publisher, persistent=persistent)
 
         if batch:
             return cast("BatchPublisher", publisher)

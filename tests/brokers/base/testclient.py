@@ -1,5 +1,6 @@
 import asyncio
 import gc
+import json
 from abc import abstractmethod
 from unittest.mock import Mock
 
@@ -147,6 +148,7 @@ class BrokerTestclientTestcase(BrokerPublishTestcase, BrokerConsumeTestcase):
             with pytest.raises(ValueError):  # noqa: PT011
                 await br.publish("hello", queue)
 
+    @pytest.mark.asyncio()
     async def test_broker_gets_patched_attrs_within_cm(self, fake_producer_cls) -> None:
         test_broker = self.get_broker()
         await test_broker.start()
@@ -157,16 +159,15 @@ class BrokerTestclientTestcase(BrokerPublishTestcase, BrokerConsumeTestcase):
             assert isinstance(br.start, Mock)
             assert isinstance(br._connect, Mock)
             assert isinstance(br.stop, Mock)
-            assert isinstance(br.close, Mock)
             assert isinstance(br._producer, fake_producer_cls)
 
         assert not isinstance(br.start, Mock)
         assert not isinstance(br._connect, Mock)
         assert not isinstance(br.stop, Mock)
-        assert not isinstance(br.close, Mock)
         assert br._connection is not None
         assert br._producer == old_producer
 
+    @pytest.mark.asyncio()
     async def test_broker_with_real_doesnt_get_patched(self) -> None:
         test_broker = self.get_broker()
         await test_broker.start()
@@ -174,11 +175,11 @@ class BrokerTestclientTestcase(BrokerPublishTestcase, BrokerConsumeTestcase):
         async with self.patch_broker(test_broker, with_real=True) as br:
             assert not isinstance(br.start, Mock)
             assert not isinstance(br._connect, Mock)
-            assert not isinstance(br.close, Mock)
             assert not isinstance(br.stop, Mock)
             assert br._connection is not None
             assert br._producer is not None
 
+    @pytest.mark.asyncio()
     async def test_broker_with_real_patches_publishers_and_subscribers(
         self,
         queue: str,
@@ -203,3 +204,33 @@ class BrokerTestclientTestcase(BrokerPublishTestcase, BrokerConsumeTestcase):
                     await asyncio.sleep(0.1)
 
                 publisher.mock.assert_called_once_with("response: hello")
+
+    @pytest.mark.asyncio()
+    async def test_publisher_response_with_model(self, queue: str) -> None:
+        """Fixes https://github.com/ag2ai/faststream/issues/2578."""
+        from pydantic import BaseModel
+
+        class ModelA(BaseModel):
+            param1: int
+
+        class ModelB(BaseModel):
+            param2: int
+
+        test_broker = self.get_broker(apply_types=True)
+
+        publisher = test_broker.publisher(queue + "resp")
+
+        args, kwargs = self.get_subscriber_params(queue)
+
+        @test_broker.subscriber(*args, **kwargs)
+        @publisher
+        async def m(msg: ModelA) -> ModelB:
+            return ModelB(param2=msg.param1)
+
+        async with self.patch_broker(test_broker) as br:
+            # test publish with response
+            await br.publish(ModelA(param1=1), queue)
+
+            # test request
+            data = await br.request(ModelA(param1=1), queue)
+            assert json.loads(data.body) == {"param2": 1}, data.body

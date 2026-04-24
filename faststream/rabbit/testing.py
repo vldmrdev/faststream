@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 
 import aiormq
 import anyio
-from aio_pika.message import IncomingMessage
+from aio_pika.message import IncomingMessage, encode_expiration
 from pamqp import commands as spec
 from pamqp.header import ContentHeader
 from typing_extensions import override
@@ -92,6 +92,7 @@ class TestRabbitBroker(TestBroker[RabbitBroker]):
             sub = broker.subscriber(
                 queue=publisher.routing(),
                 exchange=publisher.exchange,
+                persistent=False,
             )
         else:
             is_real = True
@@ -177,6 +178,7 @@ def build_message(
                     content_encoding=msg.content_encoding,
                     priority=msg.priority,
                     correlation_id=msg.correlation_id,
+                    expiration=encode_expiration(msg.expiration),
                     message_id=msg.message_id,
                     timestamp=msg.timestamp,
                     message_type=message_type,
@@ -243,13 +245,14 @@ class FakeProducer(AioPikaFastProducer):
         self,
         cmd: "RabbitPublishCommand",
     ) -> "PatchedMessage":
-        """Publish a message to a RabbitMQ queue or exchange."""
+        """Make a synchronous request to RabbitMQ."""
         incoming = build_message(
             message=cmd.body,
             exchange=cmd.exchange,
             routing_key=cmd.destination,
             correlation_id=cmd.correlation_id,
             headers=cmd.headers,
+            serializer=self.broker.config.fd_config._serializer,
             **cmd.message_options,
         )
 
@@ -277,6 +280,7 @@ class FakeProducer(AioPikaFastProducer):
             message=result.body,
             headers=result.headers,
             correlation_id=result.correlation_id,
+            serializer=self.broker.config.fd_config._serializer,
         )
 
 

@@ -1,10 +1,9 @@
 from collections.abc import Iterable
-from typing import TYPE_CHECKING, Annotated, Any, Literal, Union, cast, overload
+from typing import TYPE_CHECKING, Any, Literal, Union, cast, overload
 
-from typing_extensions import Doc, override
+from typing_extensions import override
 
 from faststream._internal.endpoint.publisher import PublisherUsecase
-from faststream.kafka.message import KafkaMessage
 from faststream.kafka.response import KafkaPublishCommand
 from faststream.message import gen_cor_id
 from faststream.response.publish_type import PublishType
@@ -46,68 +45,45 @@ class LogicPublisher(PublisherUsecase):
     @override
     async def request(
         self,
-        message: Annotated[
-            "SendableMessage",
-            Doc("Message body to send."),
-        ],
-        topic: Annotated[
-            str,
-            Doc("Topic where the message will be published."),
-        ] = "",
+        message: "SendableMessage",
+        topic: str = "",
         *,
-        key: Annotated[
-            bytes | Any | None,
-            Doc(
-                """
-            A key to associate with the message. Can be used to
-            determine which partition to send the message to. If partition
-            is `None` (and producer's partitioner config is left as default),
-            then messages with the same key will be delivered to the same
-            partition (but if key is `None`, partition is chosen randomly).
-            Must be type `bytes`, or be serializable to bytes via configured
-            `key_serializer`.
-            """,
-            ),
-        ] = None,
-        partition: Annotated[
-            int | None,
-            Doc(
-                """
-            Specify a partition. If not set, the partition will be
-            selected using the configured `partitioner`.
-            """,
-            ),
-        ] = None,
-        timestamp_ms: Annotated[
-            int | None,
-            Doc(
-                """
-            Epoch milliseconds (from Jan 1 1970 UTC) to use as
-            the message timestamp. Defaults to current time.
-            """,
-            ),
-        ] = None,
-        headers: Annotated[
-            dict[str, str] | None,
-            Doc("Message headers to store metainformation."),
-        ] = None,
-        correlation_id: Annotated[
-            str | None,
-            Doc(
-                "Manual message **correlation_id** setter. "
-                "**correlation_id** is a useful option to trace messages.",
-            ),
-        ] = None,
-        timeout: Annotated[
-            float,
-            Doc("Timeout to send RPC request."),
-        ] = 0.5,
+        key: bytes | Any | None = None,
+        partition: int | None = None,
+        timestamp_ms: int | None = None,
+        headers: dict[str, str] | None = None,
+        correlation_id: str | None = None,
+        timeout: float = 0.5,
     ) -> "KafkaMessage":
+        """Send a request message to Kafka topic.
+
+        Args:
+            message: Message body to send.
+            topic: Topic where the message will be published.
+            key: A key to associate with the message. Can be used to
+                determine which partition to send the message to. If partition
+                is `None` (and producer's partitioner config is left as default),
+                then messages with the same key will be delivered to the same
+                partition (but if key is `None`, partition is chosen randomly).
+                Must be type `bytes`, or be serializable to bytes via configured
+                `key_serializer`.
+            partition: Specify a partition. If not set, the partition will be
+                selected using the configured `partitioner`.
+            timestamp_ms: Epoch milliseconds (from Jan 1 1970 UTC) to use as
+                the message timestamp. Defaults to current time.
+            headers: Message headers to store metainformation.
+            correlation_id: Manual message **correlation_id** setter.
+                **correlation_id** is a useful option to trace messages.
+            timeout: Timeout to send RPC request.
+
+        Returns:
+            KafkaMessage: The response message.
+        """
         cmd = KafkaPublishCommand(
             message,
             topic=topic or self.topic,
             key=key,
-            partition=partition or self.partition,
+            partition=partition if partition is not None else self.partition,
             headers=self.headers | (headers or {}),
             correlation_id=correlation_id or gen_cor_id(),
             timestamp_ms=timestamp_ms,
@@ -148,8 +124,8 @@ class DefaultPublisher(LogicPublisher):
         headers: dict[str, str] | None = None,
         correlation_id: str | None = None,
         reply_to: str = "",
-        no_confirm: Literal[True],
-    ) -> "asyncio.Future[RecordMetadata]": ...
+        no_confirm: Literal[False] = False,
+    ) -> "RecordMetadata": ...
 
     @overload
     async def publish(
@@ -163,8 +139,8 @@ class DefaultPublisher(LogicPublisher):
         headers: dict[str, str] | None = None,
         correlation_id: str | None = None,
         reply_to: str = "",
-        no_confirm: Literal[False] = False,
-    ) -> "RecordMetadata": ...
+        no_confirm: Literal[True] = ...,
+    ) -> "asyncio.Future[RecordMetadata]": ...
 
     @overload
     async def publish(
@@ -234,7 +210,7 @@ class DefaultPublisher(LogicPublisher):
             message,
             topic=topic or self.topic,
             key=key or self.key,
-            partition=partition or self.partition,
+            partition=partition if partition is not None else self.partition,
             reply_to=reply_to or self.reply_to,
             headers=self.headers | (headers or {}),
             correlation_id=correlation_id or gen_cor_id(),
@@ -262,7 +238,7 @@ class DefaultPublisher(LogicPublisher):
         cmd.add_headers(self.headers, override=False)
         cmd.reply_to = cmd.reply_to or self.reply_to
 
-        cmd.partition = cmd.partition or self.partition
+        cmd.partition = cmd.partition if cmd.partition is not None else self.partition
         cmd.key = cmd.key or self.key
 
         await self._basic_publish(
@@ -274,63 +250,40 @@ class DefaultPublisher(LogicPublisher):
     @override
     async def request(
         self,
-        message: Annotated[
-            "SendableMessage",
-            Doc("Message body to send."),
-        ],
-        topic: Annotated[
-            str,
-            Doc("Topic where the message will be published."),
-        ] = "",
+        message: "SendableMessage",
+        topic: str = "",
         *,
-        key: Annotated[
-            bytes | Any | None,
-            Doc(
-                """
-            A key to associate with the message. Can be used to
-            determine which partition to send the message to. If partition
-            is `None` (and producer's partitioner config is left as default),
-            then messages with the same key will be delivered to the same
-            partition (but if key is `None`, partition is chosen randomly).
-            Must be type `bytes`, or be serializable to bytes via configured
-            `key_serializer`.
-            """,
-            ),
-        ] = None,
-        partition: Annotated[
-            int | None,
-            Doc(
-                """
-            Specify a partition. If not set, the partition will be
-            selected using the configured `partitioner`.
-            """,
-            ),
-        ] = None,
-        timestamp_ms: Annotated[
-            int | None,
-            Doc(
-                """
-            Epoch milliseconds (from Jan 1 1970 UTC) to use as
-            the message timestamp. Defaults to current time.
-            """,
-            ),
-        ] = None,
-        headers: Annotated[
-            dict[str, str] | None,
-            Doc("Message headers to store metainformation."),
-        ] = None,
-        correlation_id: Annotated[
-            str | None,
-            Doc(
-                "Manual message **correlation_id** setter. "
-                "**correlation_id** is a useful option to trace messages.",
-            ),
-        ] = None,
-        timeout: Annotated[
-            float,
-            Doc("Timeout to send RPC request."),
-        ] = 0.5,
+        key: bytes | Any | None = None,
+        partition: int | None = None,
+        timestamp_ms: int | None = None,
+        headers: dict[str, str] | None = None,
+        correlation_id: str | None = None,
+        timeout: float = 0.5,
     ) -> "KafkaMessage":
+        """Send a request message and wait for a response.
+
+        Args:
+            message: Message body to send.
+            topic: Topic where the message will be published.
+            key: A key to associate with the message. Can be used to
+                determine which partition to send the message to. If partition
+                is `None` (and producer's partitioner config is left as default),
+                then messages with the same key will be delivered to the same
+                partition (but if key is `None`, partition is chosen randomly).
+                Must be type `bytes`, or be serializable to bytes via configured
+                `key_serializer`.
+            partition: Specify a partition. If not set, the partition will be
+                selected using the configured `partitioner`.
+            timestamp_ms: Epoch milliseconds (from Jan 1 1970 UTC) to use as
+                the message timestamp. Defaults to current time.
+            headers: Message headers to store metainformation.
+            correlation_id: Manual message **correlation_id** setter.
+                **correlation_id** is a useful option to trace messages.
+            timeout: Timeout to send RPC request.
+
+        Returns:
+            The response message.
+        """
         return await super().request(
             message,
             topic=topic,
@@ -344,24 +297,20 @@ class DefaultPublisher(LogicPublisher):
 
 
 class BatchPublisher(LogicPublisher):
-    @overload
-    async def publish(
+    def __init__(
         self,
-        *messages: "SendableMessage",
-        topic: str = "",
-        partition: int | None = None,
-        timestamp_ms: int | None = None,
-        headers: dict[str, str] | None = None,
-        reply_to: str = "",
-        correlation_id: str | None = None,
-        no_confirm: Literal[True],
-    ) -> "asyncio.Future[RecordMetadata]": ...
+        config: "KafkaPublisherConfig",
+        specification: "PublisherSpecification[Any, Any]",
+    ) -> None:
+        super().__init__(config, specification)
+        self.key = config.key
 
     @overload
     async def publish(
         self,
         *messages: "SendableMessage",
         topic: str = "",
+        key: bytes | Any | None = None,
         partition: int | None = None,
         timestamp_ms: int | None = None,
         headers: dict[str, str] | None = None,
@@ -375,6 +324,21 @@ class BatchPublisher(LogicPublisher):
         self,
         *messages: "SendableMessage",
         topic: str = "",
+        key: bytes | Any | None = None,
+        partition: int | None = None,
+        timestamp_ms: int | None = None,
+        headers: dict[str, str] | None = None,
+        reply_to: str = "",
+        correlation_id: str | None = None,
+        no_confirm: Literal[True] = ...,
+    ) -> "asyncio.Future[RecordMetadata]": ...
+
+    @overload
+    async def publish(
+        self,
+        *messages: "SendableMessage",
+        topic: str = "",
+        key: bytes | Any | None = None,
         partition: int | None = None,
         timestamp_ms: int | None = None,
         headers: dict[str, str] | None = None,
@@ -388,6 +352,7 @@ class BatchPublisher(LogicPublisher):
         self,
         *messages: "SendableMessage",
         topic: str = "",
+        key: bytes | Any | None = None,
         partition: int | None = None,
         timestamp_ms: int | None = None,
         headers: dict[str, str] | None = None,
@@ -402,6 +367,13 @@ class BatchPublisher(LogicPublisher):
                 Messages bodies to send.
             topic:
                 Topic where the message will be published.
+            key:
+                A single key to associate with every message in this batch. If a
+                partition is not specified and the producer uses the default
+                partitioner, messages with the same key will be routed to the
+                same partition. Must be bytes or serializable to bytes via the
+                configured key serializer. If omitted, falls back to the
+                publisher's default key (if configured).
             partition:
                 Specify a partition. If not set, the partition will be
                 selected using the configured `partitioner`
@@ -424,9 +396,9 @@ class BatchPublisher(LogicPublisher):
         """
         cmd = KafkaPublishCommand(
             *messages,
-            key=None,
+            key=key or self.key,
             topic=topic or self.topic,
-            partition=partition or self.partition,
+            partition=partition if partition is not None else self.partition,
             reply_to=reply_to or self.reply_to,
             headers=self.headers | (headers or {}),
             correlation_id=correlation_id or gen_cor_id(),
@@ -455,7 +427,8 @@ class BatchPublisher(LogicPublisher):
         cmd.add_headers(self.headers, override=False)
         cmd.reply_to = cmd.reply_to or self.reply_to
 
-        cmd.partition = cmd.partition or self.partition
+        cmd.partition = cmd.partition if cmd.partition is not None else self.partition
+        cmd.key = cmd.key or self.key
 
         await self._basic_publish_batch(
             cmd,

@@ -13,11 +13,13 @@ from typing import (
 
 import anyio
 from confluent_kafka import Message
-from typing_extensions import deprecated, override
+from fast_depends import dependency_provider
+from typing_extensions import override
 
 from faststream.__about__ import SERVICE_NAME
 from faststream._internal.broker import BrokerUsecase
 from faststream._internal.constants import EMPTY
+from faststream._internal.context.repository import ContextRepo
 from faststream._internal.di import FastDependsConfig
 from faststream.confluent.configs import KafkaBrokerConfig
 from faststream.confluent.helpers import (
@@ -27,6 +29,7 @@ from faststream.confluent.helpers import (
 from faststream.confluent.publisher.producer import AsyncConfluentFastProducerImpl
 from faststream.confluent.response import KafkaPublishCommand
 from faststream.message import gen_cor_id
+from faststream.middlewares import AckPolicy
 from faststream.response.publish_type import PublishType
 from faststream.specification.schema import BrokerSpec
 
@@ -36,6 +39,7 @@ from .registrator import KafkaRegistrator
 if TYPE_CHECKING:
     from types import TracebackType
 
+    from fast_depends import Provider
     from fast_depends.dependencies import Dependant
     from fast_depends.library.serializer import SerializerProto
 
@@ -43,7 +47,6 @@ if TYPE_CHECKING:
         LoggerProto,
         SendableMessage,
     )
-    from faststream._internal.broker.registrator import Registrator
     from faststream._internal.types import (
         BrokerMiddleware,
         CustomCallable,
@@ -92,11 +95,12 @@ class KafkaBroker(
         transaction_timeout_ms: int = 60 * 1000,
         # broker base args
         graceful_timeout: float | None = 15.0,
+        ack_policy: AckPolicy = EMPTY,
         decoder: Optional["CustomCallable"] = None,
         parser: Optional["CustomCallable"] = None,
         dependencies: Iterable["Dependant"] = (),
         middlewares: Sequence["BrokerMiddleware[Any, Any]"] = (),
-        routers: Sequence["Registrator[Message]"] = (),
+        routers: Iterable[KafkaRegistrator] = (),
         # AsyncAPI args
         security: Optional["BaseSecurity"] = None,
         specification_url: str | Iterable[str] | None = None,
@@ -109,7 +113,9 @@ class KafkaBroker(
         log_level: int = logging.INFO,
         # FastDepends args
         apply_types: bool = True,
+        provider: Optional["Provider"] = None,
         serializer: Optional["SerializerProto"] = EMPTY,
+        context: Optional["ContextRepo"] = None,
     ) -> None:
         """Initialize KafkaBroker.
 
@@ -195,6 +201,7 @@ class KafkaBroker(
             transactional_id: Transactional ID for the producer.
             transaction_timeout_ms: Transaction timeout in milliseconds.
             graceful_timeout: Graceful shutdown timeout. Broker waits for all running subscribers completion before shut down.
+            ack_policy: Default acknowledgement policy for all subscribers. Individual subscribers can override.
             decoder: Custom decoder object.
             parser: Custom parser object.
             dependencies: Dependencies to apply to all broker subscribers.
@@ -210,6 +217,8 @@ class KafkaBroker(
             log_level: Service messages log level.
             apply_types: Whether to use FastDepends or not.
             serializer: Serializer for FastDepends.
+            provider: Provider for FastDepends.
+            context: Context for FastDepends.
         """
         if protocol is None:
             if security is not None and security.use_ssl:
@@ -272,9 +281,12 @@ class KafkaBroker(
                 fd_config=FastDependsConfig(
                     use_fastdepends=apply_types,
                     serializer=serializer,
+                    provider=provider or dependency_provider,
+                    context=context or ContextRepo(),
                 ),
                 # subscriber args
                 graceful_timeout=graceful_timeout,
+                ack_policy=ack_policy,
                 broker_dependencies=dependencies,
                 extra_context={
                     "broker": self,
@@ -305,21 +317,6 @@ class KafkaBroker(
         await self.config.disconnect()
         self._connection = None
 
-    @deprecated(
-        "Deprecated in **FastStream 0.5.44**. "
-        "Please, use `stop` method instead. "
-        "Method `close` will be removed in **FastStream 0.7.0**.",
-        category=DeprecationWarning,
-        stacklevel=1,
-    )
-    async def close(
-        self,
-        exc_type: type[BaseException] | None = None,
-        exc_val: BaseException | None = None,
-        exc_tb: Optional["TracebackType"] = None,
-    ) -> None:
-        await self.stop(exc_type, exc_val, exc_tb)
-
     async def start(self) -> None:
         await self.connect()
         await super().start()
@@ -336,7 +333,7 @@ class KafkaBroker(
         headers: dict[str, str] | None = None,
         correlation_id: str | None = None,
         reply_to: str = "",
-        no_confirm: Literal[True],
+        no_confirm: Literal[True] = ...,
     ) -> asyncio.Future[Message | None]: ...
 
     @overload
@@ -353,6 +350,21 @@ class KafkaBroker(
         reply_to: str = "",
         no_confirm: Literal[False] = False,
     ) -> Message | None: ...
+
+    @overload
+    async def publish(
+        self,
+        message: "SendableMessage",
+        topic: str,
+        *,
+        key: bytes | str | None = None,
+        partition: int | None = None,
+        timestamp_ms: int | None = None,
+        headers: dict[str, str] | None = None,
+        correlation_id: str | None = None,
+        reply_to: str = "",
+        no_confirm: bool = False,
+    ) -> asyncio.Future[Message | None] | Message | None: ...
 
     @override
     async def publish(

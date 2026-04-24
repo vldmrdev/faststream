@@ -89,9 +89,15 @@ class BinaryMessageFormatV1(MessageFormat):
                 headers = parsed_data["headers"]
 
         except Exception:
-            # Raw Redis message format
-            final_data = data
-            headers = {}
+            # Raw Redis message format or legacy JSON envelope
+            try:
+                parsed_data = json_loads(data)
+                final_data = parsed_data["data"].encode()
+                headers = parsed_data.get("headers", {})
+            except Exception:
+                final_data = data
+                headers = {}
+            return final_data, headers
 
         return final_data, headers
 

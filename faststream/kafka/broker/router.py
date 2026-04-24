@@ -1,7 +1,6 @@
 from collections.abc import Awaitable, Callable, Iterable, Sequence
 from typing import (
     TYPE_CHECKING,
-    Annotated,
     Any,
     Literal,
     Optional,
@@ -9,7 +8,6 @@ from typing import (
 )
 
 from aiokafka.coordinator.assignors.roundrobin import RoundRobinPartitionAssignor
-from typing_extensions import deprecated
 
 from faststream._internal.broker.router import (
     ArgsContainer,
@@ -28,12 +26,9 @@ if TYPE_CHECKING:
     from fast_depends.dependencies import Dependant
 
     from faststream._internal.basic_types import SendableMessage
-    from faststream._internal.broker.registrator import Registrator
     from faststream._internal.types import (
         BrokerMiddleware,
         CustomCallable,
-        PublisherMiddleware,
-        SubscriberMiddleware,
     )
 
 
@@ -52,14 +47,6 @@ class KafkaPublisher(ArgsContainer):
         headers: dict[str, str] | None = None,
         reply_to: str = "",
         batch: bool = False,
-        # basic args
-        middlewares: Annotated[
-            Sequence["PublisherMiddleware"],
-            deprecated(
-                "This option was deprecated in 0.6.0. Use router-level middlewares instead."
-                "Scheduled to remove in 0.7.0",
-            ),
-        ] = (),
         # AsyncAPI args
         title: str | None = None,
         description: str | None = None,
@@ -87,7 +74,6 @@ class KafkaPublisher(ArgsContainer):
                 Can be overridden by `publish.headers` if specified.
             reply_to: Topic name to send response.
             batch: Whether to send messages in batches or not.
-            middlewares: Publisher middlewares to wrap outgoing messages.
             title: AsyncAPI publisher object title.
             description: AsyncAPI publisher object description.
             schema:
@@ -102,8 +88,6 @@ class KafkaPublisher(ArgsContainer):
             batch=batch,
             headers=headers,
             reply_to=reply_to,
-            # basic args
-            middlewares=middlewares,
             # AsyncAPI args
             title=title,
             description=description,
@@ -123,6 +107,7 @@ class KafkaRoute(SubscriberRoute):
         publishers: Iterable[KafkaPublisher] = (),
         batch: bool = False,
         group_id: str | None = None,
+        group_instance_id: str | None = None,
         key_deserializer: Callable[[bytes], Any] | None = None,
         value_deserializer: Callable[[bytes], Any] | None = None,
         fetch_max_bytes: int = 50 * 1024 * 1024,
@@ -130,13 +115,6 @@ class KafkaRoute(SubscriberRoute):
         fetch_max_wait_ms: int = 500,
         max_partition_fetch_bytes: int = 1 * 1024 * 1024,
         auto_offset_reset: Literal["latest", "earliest", "none"] = "latest",
-        auto_commit: Annotated[
-            bool,
-            deprecated(
-                "This option is deprecated and will be removed in 0.7.0 release. "
-                "Please, use `ack_policy=AckPolicy.ACK_FIRST` instead."
-            ),
-        ] = EMPTY,
         auto_commit_interval_ms: int = 5 * 1000,
         check_crcs: bool = True,
         partition_assignment_strategy: Sequence["AbstractPartitionAssignor"] = (
@@ -161,27 +139,13 @@ class KafkaRoute(SubscriberRoute):
         dependencies: Iterable["Dependant"] = (),
         parser: Optional["CustomCallable"] = None,
         decoder: Optional["CustomCallable"] = None,
-        middlewares: Annotated[
-            Sequence["SubscriberMiddleware[Any]"],
-            deprecated(
-                "This option was deprecated in 0.6.0. Use router-level middlewares instead."
-                "Scheduled to remove in 0.7.0",
-            ),
-        ] = (),
-        no_ack: Annotated[
-            bool,
-            deprecated(
-                "This option was deprecated in 0.6.0 to prior to **ack_policy=AckPolicy.MANUAL**. "
-                "Scheduled to remove in 0.7.0",
-            ),
-        ] = EMPTY,
         ack_policy: AckPolicy = EMPTY,
         no_reply: bool = False,
         # AsyncAPI args
         title: str | None = None,
         description: str | None = None,
         include_in_schema: bool = True,
-        max_workers: int = 1,
+        max_workers: int | None = None,
     ) -> None:
         """Initialize KafkaRoute.
 
@@ -197,6 +161,11 @@ class KafkaRoute(SubscriberRoute):
                 partition assignment (if enabled), and to use for fetching and
                 committing offsets. If `None`, auto-partition assignment (via
                 group coordinator) and offset commits are disabled.
+            group_instance_id:
+                Name of the group instance ID used for static
+                membership (KIP-345). If set, the consumer is treated as a
+                static member, which means it does not join/leave the group
+                on each restart, avoiding unnecessary rebalances.
             key_deserializer:
                     Any callable that takes a raw message `bytes`
                     key and returns a deserialized one.
@@ -236,9 +205,6 @@ class KafkaRoute(SubscriberRoute):
                 * `earliest` will move to the oldest available message
                 * `latest` will move to the most recent
                 * `none` will raise an exception so you can handle this case
-            auto_commit:
-                If `True` the consumer's offset will be
-                periodically committed in the background.
             auto_commit_interval_ms:
                 Milliseconds between automatic
                 offset commits, if `auto_commit` is `True`.
@@ -360,8 +326,6 @@ class KafkaRoute(SubscriberRoute):
             dependencies: Dependencies list (`[Dependant(),]`) to apply to the subscriber.
             parser: Parser to map original **ConsumerRecord** object to FastStream one.
             decoder: Function to decode FastStream msg bytes body to python objects.
-            middlewares: Subscriber middlewares to wrap incoming message processing.
-            no_ack: Whether to disable **FastStream** auto acknowledgement logic or not.
             ack_policy: AckPolicy = EMPTY,
             no_reply: Whether to disable **FastStream** RPC and Reply To auto responses or not.
             title: AsyncAPI subscriber object title.
@@ -377,6 +341,7 @@ class KafkaRoute(SubscriberRoute):
             publishers=publishers,
             max_workers=max_workers,
             group_id=group_id,
+            group_instance_id=group_instance_id,
             key_deserializer=key_deserializer,
             value_deserializer=value_deserializer,
             fetch_max_wait_ms=fetch_max_wait_ms,
@@ -384,7 +349,6 @@ class KafkaRoute(SubscriberRoute):
             fetch_min_bytes=fetch_min_bytes,
             max_partition_fetch_bytes=max_partition_fetch_bytes,
             auto_offset_reset=auto_offset_reset,
-            auto_commit=auto_commit,
             auto_commit_interval_ms=auto_commit_interval_ms,
             check_crcs=check_crcs,
             partition_assignment_strategy=partition_assignment_strategy,
@@ -406,10 +370,8 @@ class KafkaRoute(SubscriberRoute):
             dependencies=dependencies,
             parser=parser,
             decoder=decoder,
-            middlewares=middlewares,
             no_reply=no_reply,
             ack_policy=ack_policy,
-            no_ack=no_ack,
             # AsyncAPI args
             title=title,
             description=description,
@@ -435,10 +397,11 @@ class KafkaRouter(
         *,
         dependencies: Iterable["Dependant"] = (),
         middlewares: Sequence["BrokerMiddleware[Any, Any]"] = (),
-        routers: Sequence["Registrator[ConsumerRecord]"] = (),
+        routers: Iterable[KafkaRegistrator] = (),
         parser: Optional["CustomCallable"] = None,
         decoder: Optional["CustomCallable"] = None,
         include_in_schema: bool | None = None,
+        ack_policy: "AckPolicy" = EMPTY,
     ) -> None:
         """Initialize KafkaRouter.
 
@@ -451,11 +414,15 @@ class KafkaRouter(
             parser: Parser to map original **ConsumerRecord** object to FastStream one.
             decoder: Function to decode FastStream msg bytes body to python objects.
             include_in_schema: Whetever to include operation in AsyncAPI schema or not.
+            ack_policy:
+                Default acknowledgement policy for all subscribers in this router.
+                Can be overridden at the subscriber level.
         """
         super().__init__(
             handlers=handlers,
             config=KafkaBrokerConfig(
                 broker_middlewares=middlewares,
+                ack_policy=ack_policy,
                 broker_dependencies=dependencies,
                 broker_parser=parser,
                 broker_decoder=decoder,

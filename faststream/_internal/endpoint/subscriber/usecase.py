@@ -4,7 +4,6 @@ from contextlib import AbstractContextManager, AsyncExitStack
 from itertools import chain
 from typing import (
     TYPE_CHECKING,
-    Annotated,
     Any,
     Generic,
     NamedTuple,
@@ -12,7 +11,7 @@ from typing import (
     Union,
 )
 
-from typing_extensions import Self, deprecated, overload, override
+from typing_extensions import Self, overload, override
 
 from faststream._internal.endpoint.usecase import Endpoint
 from faststream._internal.endpoint.utils import ParserComposition
@@ -24,7 +23,7 @@ from faststream._internal.types import (
 )
 from faststream._internal.utils.functions import FakeContext, to_async
 from faststream.exceptions import StopConsume, SubscriberNotFound
-from faststream.middlewares import AckPolicy, AcknowledgementMiddleware
+from faststream.middlewares import AcknowledgementMiddleware
 from faststream.middlewares.logging import CriticalLogMiddleware
 from faststream.response import ensure_response
 
@@ -46,7 +45,6 @@ if TYPE_CHECKING:
         BrokerMiddleware,
         CustomCallable,
         Filter,
-        SubscriberMiddleware,
     )
     from faststream.message import StreamMessage
     from faststream.middlewares import BaseMiddleware
@@ -59,7 +57,6 @@ if TYPE_CHECKING:
 class _CallOptions(NamedTuple):
     parser: Optional["CustomCallable"]
     decoder: Optional["CustomCallable"]
-    middlewares: Sequence["SubscriberMiddleware[Any]"]
     dependencies: Iterable["Dependant"]
 
 
@@ -85,12 +82,13 @@ class SubscriberUsecase(Endpoint, Generic[MsgType]):
         self._no_reply = config.no_reply
         self._parser = config.parser
         self._decoder = config.decoder
+
         self.ack_policy = config.ack_policy
+        self.__auto_ack_disabled = config.auto_ack_disabled
 
         self._call_options = _CallOptions(
             parser=None,
             decoder=None,
-            middlewares=(),
             dependencies=(),
         )
 
@@ -116,17 +114,52 @@ class SubscriberUsecase(Endpoint, Generic[MsgType]):
             extra=self.get_log_context(None),
         )
 
+    def _get_parser_and_decoder(
+        self,
+        item_parser: Optional["CustomCallable"] = None,
+        item_decoder: Optional["CustomCallable"] = None,
+    ) -> tuple[AsyncCallable, AsyncCallable]:
+        """Method to resolve parsers with priority.
+
+        First priority
+        >>> sub = broker.subscriber()
+        >>>
+        >>> @sub(parser=P0_parser)
+        >>> async def handler(): ...
+
+        Second priority
+        >>> sub = broker.subscriber(parser=P1_parser)
+
+        Third priority
+        >>> Broker(parser=P2_parser)
+
+        Default parser is `self._parser`.
+        So, the final parser object is
+        >>> ParserComposition(P0_parser or P1_parser or P2_parser, self._parser)
+        """
+        if parser := (
+            item_parser or self._call_options.parser or self._outer_config.broker_parser
+        ):
+            async_parser: AsyncCallable = ParserComposition(parser, self._parser)
+        else:
+            async_parser = self._parser
+
+        if decoder := (
+            item_decoder
+            or self._call_options.decoder
+            or self._outer_config.broker_decoder
+        ):
+            async_decoder: AsyncCallable = ParserComposition(decoder, self._decoder)
+        else:
+            async_decoder = self._decoder
+
+        return async_parser, async_decoder
+
     def _build_fastdepends_model(self) -> None:
         for call in self.calls:
-            if parser := call.item_parser or self._outer_config.broker_parser:
-                async_parser: AsyncCallable = ParserComposition(parser, self._parser)
-            else:
-                async_parser = self._parser
-
-            if decoder := call.item_decoder or self._outer_config.broker_decoder:
-                async_decoder: AsyncCallable = ParserComposition(decoder, self._decoder)
-            else:
-                async_decoder = self._decoder
+            async_parser, async_decoder = self._get_parser_and_decoder(
+                call.item_parser, call.item_decoder
+            )
 
             call._setup(
                 parser=async_parser,
@@ -147,7 +180,10 @@ class SubscriberUsecase(Endpoint, Generic[MsgType]):
 
         Blocks event loop up to graceful_timeout seconds.
         """
+        # set running false before releasing to stop new message reading
         self.running = False
+
+        # Wait for already consumed messages to be processed
         if isinstance(self.lock, MultiLock):
             await self.lock.wait_release(self._outer_config.graceful_timeout)
 
@@ -156,13 +192,11 @@ class SubscriberUsecase(Endpoint, Generic[MsgType]):
         *,
         parser_: Optional["CustomCallable"],
         decoder_: Optional["CustomCallable"],
-        middlewares_: Sequence["SubscriberMiddleware[Any]"],
         dependencies_: Iterable["Dependant"],
     ) -> Self:
         self._call_options = _CallOptions(
             parser=parser_,
             decoder=decoder_,
-            middlewares=middlewares_,
             dependencies=dependencies_,
         )
         return self
@@ -175,13 +209,6 @@ class SubscriberUsecase(Endpoint, Generic[MsgType]):
         filter: "Filter[Any]" = default_filter,
         parser: Optional["CustomCallable"] = None,
         decoder: Optional["CustomCallable"] = None,
-        middlewares: Annotated[
-            Sequence["SubscriberMiddleware[Any]"],
-            deprecated(
-                "This option was deprecated in 0.6.0. Use router-level middlewares instead."
-                "Scheduled to remove in 0.7.0",
-            ),
-        ] = (),
         dependencies: Iterable["Dependant"] = (),
     ) -> "HandlerCallWrapper[P_HandlerParams, T_HandlerReturn]": ...
 
@@ -193,13 +220,6 @@ class SubscriberUsecase(Endpoint, Generic[MsgType]):
         filter: "Filter[Any]" = default_filter,
         parser: Optional["CustomCallable"] = None,
         decoder: Optional["CustomCallable"] = None,
-        middlewares: Annotated[
-            Sequence["SubscriberMiddleware[Any]"],
-            deprecated(
-                "This option was deprecated in 0.6.0. Use router-level middlewares instead."
-                "Scheduled to remove in 0.7.0",
-            ),
-        ] = (),
         dependencies: Iterable["Dependant"] = (),
     ) -> Callable[
         [Callable[P_HandlerParams, T_HandlerReturn]],
@@ -214,13 +234,6 @@ class SubscriberUsecase(Endpoint, Generic[MsgType]):
         filter: "Filter[Any]" = default_filter,
         parser: Optional["CustomCallable"] = None,
         decoder: Optional["CustomCallable"] = None,
-        middlewares: Annotated[
-            Sequence["SubscriberMiddleware[Any]"],
-            deprecated(
-                "This option was deprecated in 0.6.0. Use router-level middlewares instead."
-                "Scheduled to remove in 0.7.0",
-            ),
-        ] = (),
         dependencies: Iterable["Dependant"] = (),
     ) -> Union[
         "HandlerCallWrapper[P_HandlerParams, T_HandlerReturn]",
@@ -230,7 +243,6 @@ class SubscriberUsecase(Endpoint, Generic[MsgType]):
         ],
     ]:
         total_deps = (*self._call_options.dependencies, *dependencies)
-        total_middlewares = (*self._call_options.middlewares, *middlewares)
         async_filter: AsyncFilter[StreamMessage[MsgType]] = to_async(filter)
 
         def real_wrapper(
@@ -243,9 +255,8 @@ class SubscriberUsecase(Endpoint, Generic[MsgType]):
                 HandlerItem[MsgType](
                     handler=handler,
                     filter=async_filter,
-                    item_parser=parser or self._call_options.parser,
-                    item_decoder=decoder or self._call_options.decoder,
-                    item_middlewares=total_middlewares,
+                    item_parser=parser,
+                    item_decoder=decoder,
                     dependencies=total_deps,
                 ),
             )
@@ -289,6 +300,7 @@ class SubscriberUsecase(Endpoint, Generic[MsgType]):
             stack.enter_context(self.lock)
 
             # Enter context before middlewares
+            stack.enter_context(context.scope("handler_", self))
             stack.enter_context(context.scope("logger", logger_state.logger.logger))
             for k, v in self._outer_config.extra_context.items():
                 stack.enter_context(context.scope(k, v))
@@ -364,7 +376,7 @@ class SubscriberUsecase(Endpoint, Generic[MsgType]):
     def __build__middlewares_stack(self) -> tuple["BrokerMiddleware[MsgType]", ...]:
         logger_state = self._outer_config.logger
 
-        if self.ack_policy is AckPolicy.MANUAL:
+        if self.__auto_ack_disabled:
             broker_middlewares = (
                 CriticalLogMiddleware(logger_state),
                 *self._broker_middlewares,

@@ -10,7 +10,7 @@ try:
         RedisStreamMessage,
     )
     from .broker import RedisBroker, RedisPublisher, RedisRoute, RedisRouter
-    from .parser import BinaryMessageFormatV1, JSONMessageFormat
+    from .parser import BinaryMessageFormatV1
     from .response import RedisPublishCommand, RedisResponse
     from .schemas import ListSub, PubSub, StreamSub
     from .testing import TestRedisBroker
@@ -25,13 +25,11 @@ except ImportError as e:
 
 __all__ = (
     "BinaryMessageFormatV1",
-    "JSONMessageFormat",
     "ListSub",
     "Pipeline",
     "PubSub",
     "Redis",
     "RedisBroker",
-    "RedisChannelMessage",
     "RedisChannelMessage",
     "RedisListMessage",
     "RedisMessage",

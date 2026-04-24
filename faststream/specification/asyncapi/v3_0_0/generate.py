@@ -139,7 +139,11 @@ def get_broker_server(
     }
 
     if specification.security is not None:
-        broker_meta["security"] = specification.security.get_requirement()
+        broker_meta["security"] = [
+            Reference(**{"$ref": f"#/components/securitySchemes/{sec}"})
+            for security_item in specification.security.get_requirement()
+            for sec in security_item
+        ]
 
     single_server = len(specification.url) == 1
     for i, broker_url in enumerate(specification.url, 1):
@@ -177,7 +181,20 @@ def get_broker_channels(
 
             channels[channel_key] = channel_obj
 
-            operations[f"{channel_key}Subscribe"] = Operation.from_sub(
+            operation_key = (
+                f"{channel_key}Subscribe"
+                if sub.specification.config.title_ is None
+                or sub.specification.config.title_ == "/"
+                else sub.specification.config.title_
+            )
+            if operation_key in operations:
+                warnings.warn(
+                    f"Overwrite channel handler, operations have the same names: `{operation_key}`",
+                    RuntimeWarning,
+                    stacklevel=1,
+                )
+
+            operations[operation_key] = Operation.from_sub(
                 messages=[
                     Reference(**{
                         "$ref": f"#/channels/{channel_key}/messages/{msg_name}",
@@ -275,6 +292,12 @@ def _resolve_msg_payloads(
         one_of_list = []
         processed_payloads: dict[str, dict[str, Any]] = {}
         for name, payload in one_of.items():
+            # Promote nested Pydantic $defs from each payload into components/schemas
+            # so that referenced nested models are available globally.
+            if isinstance(payload, dict) and DEF_KEY in payload:
+                defs = payload.pop(DEF_KEY) or {}
+                for def_name, def_schema in defs.items():
+                    payloads[clear_key(def_name)] = def_schema
             processed_payloads[clear_key(name)] = payload
             one_of_list.append(Reference(**{"$ref": f"#/components/schemas/{name}"}))
 

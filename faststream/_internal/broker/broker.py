@@ -1,14 +1,9 @@
 from abc import abstractmethod
-from collections.abc import Sequence
-from typing import (
-    TYPE_CHECKING,
-    Any,
-    Generic,
-    Optional,
-)
+from collections.abc import Iterable, Sequence
+from typing import TYPE_CHECKING, Any, Generic, Optional
 
 from fast_depends import Provider
-from typing_extensions import Self, deprecated
+from typing_extensions import Self
 
 from faststream._internal.configs import BrokerConfigType
 from faststream._internal.types import (
@@ -46,7 +41,7 @@ class BrokerUsecase(
         *,
         config: BrokerConfigType,
         specification: "BrokerSpec",
-        routers: Sequence["Registrator[MsgType]"],
+        routers: Iterable[Registrator[Any, Any]],
         **connection_kwargs: Any,
     ) -> None:
         super().__init__(
@@ -93,8 +88,6 @@ class BrokerUsecase(
         self.config.fd_config = config | self.config.fd_config
 
     async def start(self) -> None:
-        self._setup_logger()
-
         # TODO: filter by already running handlers after TestClient refactor
         for sub in self.subscribers:
             await sub.start()
@@ -116,6 +109,8 @@ class BrokerUsecase(
         """Connect to a remote server."""
         if self._connection is None:
             self._connection = await self._connect()
+            self._setup_logger()
+
         return self._connection
 
     @abstractmethod
@@ -133,22 +128,6 @@ class BrokerUsecase(
             await sub.stop()
 
         self.running = False
-
-    @deprecated(
-        "Deprecated in **FastStream 0.5.44**. "
-        "Please, use `stop` method instead. "
-        "Method `close` will be removed in **FastStream 0.7.0**.",
-        category=DeprecationWarning,
-        stacklevel=1,
-    )
-    async def close(
-        self,
-        exc_type: type[BaseException] | None = None,
-        exc_val: BaseException | None = None,
-        exc_tb: Optional["TracebackType"] = None,
-    ) -> None:
-        """Closes the object."""
-        await self.stop(exc_type, exc_val, exc_tb)
 
     @abstractmethod
     async def ping(self, timeout: float | None) -> bool:

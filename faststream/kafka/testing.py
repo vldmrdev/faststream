@@ -73,19 +73,23 @@ class TestKafkaBroker(TestBroker[KafkaBroker]):
         if sub is None:
             is_real = False
 
+            topic_name = publisher.topic
+
             if publisher.partition:
                 tp = TopicPartition(
-                    topic=publisher.topic,
+                    topic=topic_name,
                     partition=publisher.partition,
                 )
                 sub = broker.subscriber(
                     partitions=[tp],
                     batch=isinstance(publisher, BatchPublisher),
+                    persistent=False,
                 )
             else:
                 sub = broker.subscriber(
-                    publisher.topic,
+                    topic_name,
                     batch=isinstance(publisher, BatchPublisher),
+                    persistent=False,
                 )
         else:
             is_real = True
@@ -198,12 +202,13 @@ class FakeProducer(AioKafkaFastProducer):
                     topic=cmd.destination,
                     partition=cmd.partition,
                     timestamp_ms=cmd.timestamp_ms,
+                    key=cmd.key_for(message_position),
                     headers=cmd.headers,
                     correlation_id=cmd.correlation_id,
                     reply_to=cmd.reply_to,
                     serializer=self.broker.config.fd_config._serializer,
                 )
-                for message in cmd.batch_bodies
+                for message_position, message in enumerate(cmd.batch_bodies)
             )
 
             if isinstance(handler, BatchSubscriber):

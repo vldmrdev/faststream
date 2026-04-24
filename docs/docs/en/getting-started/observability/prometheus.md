@@ -53,7 +53,13 @@ To add a metrics to your broker, you need to:
     {!> docs_src/getting_started/prometheus/redis.py!}
     ```
 
+=== "MQTT"
+    ```python linenums="1" hl_lines="6 10"
+    {!> docs_src/getting_started/prometheus/mqtt.py!}
+    ```
+
 ### Exposing the `/metrics` endpoint
+
 The way Prometheus works requires the service to expose an HTTP endpoint for analysis.
 By convention, this is a GET endpoint, and its path is usually `/metrics`.
 
@@ -87,6 +93,11 @@ passing in the registry that was passed to `PrometheusMiddleware`.
     {!> docs_src/getting_started/prometheus/redis_asgi.py!}
     ```
 
+=== "MQTT"
+    ```python linenums="1" hl_lines="6 10 13 16"
+    {!> docs_src/getting_started/prometheus/mqtt_asgi.py!}
+    ```
+
 ---
 
 ### Exported metrics
@@ -114,6 +125,12 @@ passing in the registry that was passed to `PrometheusMiddleware`.
 | **published_messages_duration_seconds**          | **Histogram** | {{ published_messages_duration_seconds_description }}          | `app_name`, `broker`, `destination`                   |
 | **published_messages_exceptions_total**          | **Counter**   | {{ published_messages_exceptions_total_description }}          | `app_name`, `broker`, `destination`, `exception_type` |
 
+!!! warning
+    When using `no_confirm=True` in Kafka publishers, publishing exceptions are not tracked by built-in Prometheus metrics. This is because with `no_confirm=True`, FastStream does not wait for the delivery confirmation from Kafka, so any errors that happen after sending the message (e.g. network issues, broker rejections) are not caught by the KafkaPrometheusMiddleware. The middleware only captures errors that occur during a call to `publish` with `no_confirm=False` (by default).
+
+    To ensure accurate observability, use `no_confirm=False` when publishing messages, or implement custom error tracking using future callbacks.
+
+
 ### Labels
 
 | Label                             | Description                                                     | Values                                            |
@@ -126,6 +143,16 @@ passing in the registry that was passed to `PrometheusMiddleware`.
 | status (while publishing)         | Message publishing status                                       | `success`, `error`                                |
 | destination                       | Where the message is sent                                       |                                                   |
 | exception_type (while publishing) | Exception type when publishing message                          |                                                   |
+
+### Integrate custom metrics
+
+To integrate your custom metrics with FastStream, you should declare the metric, specifying the **same registry** that you passed to middleware.
+
+```python linenums="1" hl_lines="1 6 7 11 18-19"
+{!> docs_src/getting_started/prometheus/kafka_custom_metric.py!}
+```
+
+To learn about all the metric types supported by the `prometheus_client` Python library, check out the official instrumentation [**documentation**](https://prometheus.github.io/client_python/instrumenting/){.external-link target="_blank"}.
 
 ### Grafana dashboard
 

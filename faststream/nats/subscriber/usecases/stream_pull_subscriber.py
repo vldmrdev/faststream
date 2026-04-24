@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, Any, Optional, cast
 
 import anyio
 from nats.errors import ConnectionClosedError, TimeoutError
+from nats.js.errors import ServiceUnavailableError
 from typing_extensions import override
 
 from faststream._internal.endpoint.subscriber.mixins import ConcurrentMixin, TasksMixin
@@ -65,7 +66,7 @@ class PullStreamSubscriber(
             config=self.config,
             **self.extra_options,
         )
-        self.add_task(self._consume_pull(cb=self.consume))
+        self.add_task(self._consume_pull, func_kwargs={"cb": self.consume})
 
     async def _consume_pull(
         self,
@@ -76,7 +77,7 @@ class PullStreamSubscriber(
 
         while self.running:  # pragma: no branch
             messages = []
-            with suppress(TimeoutError, ConnectionClosedError):
+            with suppress(TimeoutError, ConnectionClosedError, ServiceUnavailableError):
                 messages = await self.subscription.fetch(
                     batch=self.pull_sub.batch_size,
                     timeout=self.pull_sub.timeout,
@@ -102,7 +103,7 @@ class ConcurrentPullStreamSubscriber(ConcurrentMixin["Msg"], PullStreamSubscribe
             config=self.config,
             **self.extra_options,
         )
-        self.add_task(self._consume_pull(cb=self._put_msg))
+        self.add_task(self._consume_pull, func_kwargs={"cb": self._put_msg})
 
 
 class BatchPullStreamSubscriber(
@@ -159,6 +160,7 @@ class BatchPullStreamSubscriber(
             return None
 
         context = self._outer_config.fd_config.context
+        async_parser, async_decoder = self._get_parser_and_decoder()
 
         return cast(
             "NatsMessage",
@@ -167,8 +169,8 @@ class BatchPullStreamSubscriber(
                 middlewares=(
                     m(raw_message, context=context) for m in self._broker_middlewares
                 ),
-                parser=self._parser,
-                decoder=self._decoder,
+                parser=async_parser,
+                decoder=async_decoder,
             ),
         )
 
@@ -187,10 +189,11 @@ class BatchPullStreamSubscriber(
         else:
             fetch_sub = self._fetch_sub
 
+        context = self._outer_config.fd_config.context
+        async_parser, async_decoder = self._get_parser_and_decoder()
+
         while True:
             raw_message = await fetch_sub.fetch(batch=1)
-
-            context = self._outer_config.fd_config.context
 
             yield cast(
                 "NatsMessage",
@@ -199,8 +202,8 @@ class BatchPullStreamSubscriber(
                     middlewares=(
                         m(raw_message, context=context) for m in self._broker_middlewares
                     ),
-                    parser=self._parser,
-                    decoder=self._decoder,
+                    parser=async_parser,
+                    decoder=async_decoder,
                 ),
             )
 
@@ -215,14 +218,14 @@ class BatchPullStreamSubscriber(
             config=self.config,
             **self.extra_options,
         )
-        self.add_task(self._consume_pull())
+        self.add_task(self._consume_pull)
 
     async def _consume_pull(self) -> None:
         """Endless task consuming messages using NATS Pull subscriber."""
         assert self.subscription, "You should call `create_subscription` at first."
 
         while self.running:  # pragma: no branch
-            with suppress(TimeoutError, ConnectionClosedError):
+            with suppress(TimeoutError, ConnectionClosedError, ServiceUnavailableError):
                 messages = await self.subscription.fetch(
                     batch=self.pull_sub.batch_size,
                     timeout=self.pull_sub.timeout,

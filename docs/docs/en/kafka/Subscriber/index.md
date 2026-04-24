@@ -58,6 +58,21 @@ The message will then be injected into the typed `msg` argument of the function,
 
 In this example case, when the message is sent to a `#!python "hello_world"` topic, it will be parsed into a `HelloWorld` class, and the `on_hello_world` function will be called with the parsed class as the `msg` argument value.
 
+## Multiple Topics
+
+You can subscribe to multiple topics with a single `#!python @broker.subscriber(...)` call by passing multiple topic names as positional arguments:
+
+```python linenums="1"
+{! docs_src/kafka/multiple_topics_subscription/app.py !}
+```
+
+A single handler will receive messages from all listed topics, under one consumer group.
+
+This differs from stacking multiple `#!python @broker.subscriber(...)` decorators, which creates separate independent handlers.
+
+!!! warning
+    When using multiple topics with `max_workers > 1`, only `AckPolicy.ACK_FIRST` is supported. Combining multiple topics, `max_workers > 1`, and any other ack policy (`ACK`, `NACK_ON_ERROR`, `REJECT_ON_ERROR`, `MANUAL`) will raise a `SetupError` at startup.
+
 ### Pattern data access
 
 You can also use pattern subscription feature to encode some data directly in the topic name. With **FastStream** you can easily access this data using the following code:
@@ -77,5 +92,5 @@ async def base_handler(
 
 There are two possible modes of concurrent message processing:
 
-* With `auto_commit=False` and `max_workers` > 1, a handler processes all messages concurrently in a at-most-once semantic.
-* With `auto_commit=True` and `max_workers` > 1, processing is concurrent between topic partitions and sequential within a partition to ensure reliable at-least-once processing. Maximum concurrency is achieved when total number of workers across all application instances running workers in the same consumer group is equal to the number of partitions in the topic. Increasing worker count beyond that will result in idle workers as not more than one consumer from a consumer group can be consuming from the same partition.
+* With `AckPolicy.ACK_FIRST` and `max_workers` > 1, a handler processes all messages concurrently in a at-most-once semantic.
+* With `AckPolicy.NACK_ON_ERROR` and `max_workers` > 1, processing is concurrent between topic partitions and sequential within a partition to ensure reliable at-least-once processing. Maximum concurrency is achieved when total number of workers across all application instances running workers in the same consumer group is equal to the number of partitions in the topic. Increasing worker count beyond that will result in idle workers as not more than one consumer from a consumer group can be consuming from the same partition.

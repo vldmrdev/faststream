@@ -68,9 +68,6 @@ class LogicSubscriber(TasksMixin, SubscriberUsecase[UnifyRedisDict]):
         self,
         *args: Any,
     ) -> None:
-        if self.tasks:
-            return
-
         await super().start()
 
         self._post_start()
@@ -78,7 +75,7 @@ class LogicSubscriber(TasksMixin, SubscriberUsecase[UnifyRedisDict]):
         start_signal = anyio.Event()
 
         if self.calls:
-            self.add_task(self._consume(*args, start_signal=start_signal))
+            self.add_task(self._consume, args, {"start_signal": start_signal})
 
             with anyio.fail_after(3.0):
                 await start_signal.wait()
